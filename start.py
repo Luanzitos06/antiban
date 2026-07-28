@@ -1,134 +1,128 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Launcher do Anti Ban Resistência Forever
-- Cria ambiente virtual automaticamente
-- Instala dependências dentro do venv
-- Solicita o token e executa o script principal
+start.py - Launcher inteligente do Anti Ban Resistência 2026
+  1. Verifica / cria ambiente virtual (venv_resistencia)
+  2. Instala todas as dependências automaticamente
+  3. Pede o token (argumento ou interativo) e inicia o bot
+  4. Durante a execução, digite 'r' + Enter para recarregar proxies
 """
 
-import subprocess
-import sys
 import os
-import json
-import getpass
+import sys
+import subprocess
 import platform
-import venv
+import threading
 
-REQUIRED_PACKAGES = ["requests", "websocket-client", "colorama"]
-MAIN_SCRIPT = "anti_ban_resistencia_forever.py"
+# ═══════════════ CONFIGURAÇÕES ═══════════════
 VENV_DIR = "venv_resistencia"
+REQUIREMENTS = [
+    "requests>=2.31.0",
+    "colorama>=0.4.6",
+    "websocket-client>=1.6.0",   # opcional, para gateway
+]
+# Nome correto do script principal
+MAIN_SCRIPT = "anti_ban_resistencia_forever.py"
+# ══════════════════════════════════════════════
+
+def check_python():
+    if sys.version_info < (3, 8):
+        print("ERRO: Python 3.8 ou superior é necessário.")
+        sys.exit(1)
 
 def create_venv():
-    """Cria o ambiente virtual se não existir."""
-    if not os.path.isdir(VENV_DIR):
-        print(f"🔧 Criando ambiente virtual em {VENV_DIR}...")
-        builder = venv.EnvBuilder(with_pip=True)
-        builder.create(VENV_DIR)
-        print("✅ Ambiente virtual criado.")
+    if not os.path.exists(VENV_DIR):
+        print(f"[+] Criando ambiente virtual em '{VENV_DIR}'...")
+        subprocess.check_call([sys.executable, "-m", "venv", VENV_DIR])
     else:
-        print(f"✅ Ambiente virtual {VENV_DIR} já existe.")
+        print(f"[✓] Ambiente virtual '{VENV_DIR}' já existe.")
 
 def get_venv_python():
-    """Retorna o caminho para o Python dentro do venv."""
     if platform.system() == "Windows":
         return os.path.join(VENV_DIR, "Scripts", "python.exe")
-    else:
-        return os.path.join(VENV_DIR, "bin", "python")
+    return os.path.join(VENV_DIR, "bin", "python")
 
-def install_packages():
-    """Instala pacotes necessários dentro do venv."""
-    python = get_venv_python()
-    print("🔍 Verificando dependências...")
-    for pkg in REQUIRED_PACKAGES:
-        # Tenta importar dentro do venv
-        try:
-            subprocess.check_call([python, "-c", f"import {pkg.replace('-', '_')}"], 
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print(f"✅ {pkg} já instalado.")
-        except subprocess.CalledProcessError:
-            print(f"📦 Instalando {pkg}...")
-            subprocess.check_call([python, "-m", "pip", "install", pkg])
-
-def check_main_script():
-    """Verifica se o script principal existe."""
-    if not os.path.isfile(MAIN_SCRIPT):
-        print(f"❌ Erro: {MAIN_SCRIPT} não encontrado no diretório atual.")
-        print("   Certifique-se de que ele está no mesmo local que este launcher.")
-        sys.exit(1)
+def install_deps():
+    venv_python = get_venv_python()
+    print("[+] Instalando dependências...")
+    subprocess.check_call([venv_python, "-m", "pip", "install", "--upgrade", "pip"])
+    for req in REQUIREMENTS:
+        subprocess.check_call([venv_python, "-m", "pip", "install", req])
+    print("[✓] Todas as dependências instaladas.")
 
 def get_token():
-    """Solicita o token ao usuário de forma segura."""
-    print("\n" + "="*50)
-    print("🔑  INSIRA O TOKEN DA SUA CONTA DISCORD")
-    print("="*50)
-    token = getpass.getpass("Token: ")
-    if not token.strip():
-        print("❌ Token vazio. Encerrando.")
-        sys.exit(1)
-    return token.strip()
+    """Obtém o token: 1º argumento -t/--token, 2º variável de ambiente, 3º input."""
+    # Procura pelo argumento -t ou --token e o próximo valor
+    args = sys.argv[1:]
+    for i, arg in enumerate(args):
+        if arg in ("-t", "--token"):
+            if i + 1 < len(args):
+                return args[i + 1]
+            else:
+                print("ERRO: Nenhum token após -t/--token")
+                sys.exit(1)
 
-def save_token(token, filename="token.txt"):
-    """Salva o token em um arquivo (opcional)."""
-    save = input("Deseja salvar o token para uso futuro? (s/N): ").strip().lower()
-    if save == "s":
-        with open(filename, "w") as f:
-            f.write(token)
-        print(f"✅ Token salvo em {filename}")
-        return True
-    return False
+    # Tenta variável de ambiente
+    env_token = os.environ.get("DISCORD_TOKEN")
+    if env_token:
+        return env_token
 
-def load_saved_token(filename="token.txt"):
-    """Tenta carregar token salvo anteriormente."""
-    if os.path.isfile(filename):
-        with open(filename, "r") as f:
-            token = f.read().strip()
-        if token:
-            return token
-    return None
+    # Pede interativamente
+    print("\nNenhum token fornecido.")
+    return input("Insira o token do Discord: ").strip()
 
-def run_main_script(token, extra_args=None):
-    """Executa o script principal usando o Python do venv."""
-    python = get_venv_python()
-    cmd = [python, MAIN_SCRIPT, "-t", token]
-    if extra_args:
-        cmd.extend(extra_args)
-    print("\n🚀 Iniciando Anti Ban Resistência Forever...\n")
+def run_bot(token):
+    venv_python = get_venv_python()
+    print(f"\n[+] Iniciando o bot com o token...\n{'='*50}\n")
+
+    # Comando para rodar o script principal
+    cmd = [venv_python, MAIN_SCRIPT, "-t", token]
+
+    # Inicia como subprocesso, capturando stdin/stdout
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        text=True,
+        bufsize=1
+    )
+
+    print("\n💡 Dica: digite 'r' + Enter a qualquer momento para recarregar proxies.\n")
+
+    # Thread para enviar comandos via stdin do processo filho
+    def input_listener():
+        while proc.poll() is None:
+            try:
+                user_input = input()
+                if user_input.strip().lower() == "r":
+                    proc.stdin.write("r\n")
+                    proc.stdin.flush()
+                    print("[+] Comando 'r' enviado para recarregar proxies.")
+            except EOFError:
+                break
+            except KeyboardInterrupt:
+                proc.terminate()
+                break
+
+    listener = threading.Thread(target=input_listener, daemon=True)
+    listener.start()
+
+    # Aguarda o bot terminar
     try:
-        subprocess.run(cmd)
+        proc.wait()
     except KeyboardInterrupt:
-        print("\n⏹️  Encerrado pelo usuário.")
-    except Exception as e:
-        print(f"❌ Erro ao executar: {e}")
+        proc.terminate()
+        print("\n[!] Bot encerrado pelo usuário.")
 
 def main():
-    # Verifica script principal
-    check_main_script()
-
-    # Cria ambiente virtual
+    check_python()
     create_venv()
-
-    # Instala dependências no venv
-    install_packages()
-
-    # Tenta carregar token salvo
-    token = load_saved_token()
-    if token:
-        use_saved = input(f"Token salvo encontrado. Usar? (S/n): ").strip().lower()
-        if use_saved == "n":
-            token = None
-
+    install_deps()
+    token = get_token()
     if not token:
-        token = get_token()
-        save_token(token)  # pergunta se quer salvar
-
-    # Argumentos adicionais
-    print("\n⚙️  Opções extras (pressione Enter para pular):")
-    extra = input("Ex: --no-gateway --delay-min 2 (ou deixe vazio): ").strip()
-    extra_args = extra.split() if extra else []
-
-    # Executa
-    run_main_script(token, extra_args)
+        print("Token inválido. Encerrando.")
+        sys.exit(1)
+    run_bot(token)
 
 if __name__ == "__main__":
     main()
